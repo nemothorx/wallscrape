@@ -15,6 +15,12 @@
     # 0 4     29  * * /home/nemo/bin/get_potd.sh $(date -d 'now -12 months' "+\%Y \%m")
     #
 
+# nagios settings
+host=$(hostname)
+service="get_potd"
+nagiosfifo=/var/lib/nagios3/rw/nagios.cmd
+nagcode=3        # 0 = OK, 1 = Warning, 2 = Critical, 3 = Unknown
+
 LOGFILE=$HOME/var/log/potd.log
 YEAR=$1
 MONTH=$2
@@ -29,6 +35,22 @@ LOGTAG=""	    # tag each log line for a given message with this.
 
 do_log() {
     echo "$(date +"%Y-%m-%d %H:%M:%S") $LOGTAG $1" >> $LOGFILE
+}
+
+tell_nagios() {
+        code=$1
+        shift
+        if [ $code -eq 0 ]; then
+                output="OK - $@"
+        elif [ $code -eq 1 ]; then
+                output="WARNING - $@"
+        elif [ $code -eq 2 ]; then
+                output="CRITICAL - $@"
+        else
+                code=3
+                output="UNKNOWN - $@"
+        fi
+    echo "[$(date +%s)] PROCESS_SERVICE_CHECK_RESULT;$host;$service;$code;$output" > $nagiosfifo
 }
 
 mk_logtag() {
@@ -93,18 +115,18 @@ do_commonspotd() {
     TDIR="/shared/Images/WikiPOTD/Commons/$YEAR-$MONTH"
     mkdir -p "$TDIR"
     cd  "$TDIR" 
-    MINDEXPAGE="http://commons.wikimedia.org/wiki/Template:Potd/$YEAR-$MONTH"
+    MINDEXPAGE="https://commons.wikimedia.org/wiki/Template:Potd/$YEAR-$MONTH"
     LOGTAG="----"
     do_log "# Processing commons for $YEAR $MONTH: $MINDEXPAGE"
     MINDEX=$(curl -s -S $MINDEXPAGE)
     DINDEX=$(echo "$MINDEX" | sed -n 's/.*magnify.*\(wiki\/File:.*\)" class.*/\1/p')
     echo "$DINDEX" | while read DAY ; do
        # echo "found $DAY, here is the image URL"
-	POTDURL="http://commons.wikimedia.org/$DAY"
+	POTDURL="https://commons.wikimedia.org/$DAY"
 	mk_logtag $POTDURL
 	do_log ": $POTDURL"
 	POTDSRC=$(curl -s -S $POTDURL)
-	POTDLINK=http:$(echo "$POTDSRC"| sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')
+	POTDLINK=https:$(echo "$POTDSRC"| sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')
 	do_log ": $POTDLINK"
 	if $(echo "$POTDLINK" | egrep -q "\.(og.|webm)$"); then
 	    do_log "_ ignoring URL (Media of the Day)"
@@ -124,18 +146,18 @@ do_enwikipotd() {
     mkdir -p "$TDIR"
     cd "$TDIR"
     LMONTH=$(date -d "$YEAR-$MONTH-01" +%B)
-    MINDEXPAGE="http://en.wikipedia.org/wiki/Wikipedia:Picture_of_the_day/${LMONTH}_${YEAR}"
+    MINDEXPAGE="https://en.wikipedia.org/wiki/Wikipedia:Picture_of_the_day/${LMONTH}_${YEAR}"
     LOGTAG="----"
     do_log "# Processing enwiki for $YEAR $MONTH: $MINDEXPAGE"
     MINDEX=$(curl -s -S $MINDEXPAGE)
     DINDEX=$(echo "$MINDEX" | sed -n 's/.*\/\(wiki.*\)\" class=.image.*/\1/p')
     echo "$DINDEX" | while read DAY ; do
 #       echo "found $DAY, here is the image URL"
-	POTDURL="http://en.wikipedia.org/$DAY"
+	POTDURL="https://en.wikipedia.org/$DAY"
 	mk_logtag $POTDURL
 	do_log ": $POTDURL"
-	POTDSRC=http:$(curl -s -S $POTDURL)
-	POTDLINK=http:$(echo "$POTDSRC" | sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')
+	POTDSRC=https:$(curl -s -S $POTDURL)
+	POTDLINK=https:$(echo "$POTDSRC" | sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')
 	do_log ": $POTDLINK"
 	if $(echo "$POTDLINK" | egrep -q ".(og.|webm)$"); then
 	    do_log "_ ignoring it as Media of the Day"
@@ -151,16 +173,41 @@ do_enwikipotd() {
 
 cd /shared/Images/WikiPOTD/
 startdu=$(du -sk */$YEAR-$MONTH/ 2>/dev/null | tr "\n" "\t")
+startdutot=$(du -skc */$YEAR-$MONTH/ 2>/dev/null | tail -1 | cut -f 1)
 starttime=$(date +%s)
 
 do_commonspotd
 do_enwikipotd
 
 cd /shared/Images/WikiPOTD/
+enddu=$(du -sk */$YEAR-$MONTH/ 2>/dev/null | tr "\n" "\t")
+enddutot=$(du -skc */$YEAR-$MONTH/ 2>/dev/null | tail -1 | cut -f 1)
+duration=$(($(date +%s)-$starttime))
 do_log "$(tree -f */$YEAR-$MONTH/ | tail -1)"
-do_log "was: $startdu"
-do_log "now: $(du -sk */$YEAR-$MONTH/ | tr "\n" "\t" )"
-do_log "duration: $(($(date +%s)-$starttime)) seconds"
+do_log "was: $startdu (total: $startdutot)"
+do_log "now: $enddu (total: $enddutot)"
+do_log "duration: $duration seconds"
+
+dudiff=$(($enddutot-$startdutot ))
+rate=$(($dudiff/$duration))
+
+logwtf=$( grep -c "$(date +"%Y-%m-%d") ..... . wtf" $LOGFILE )
+logfail=$( grep -c "$(date +"%Y-%m-%d") ..... . wtf" $LOGFILE )
+
+
+# warning if the total data is small (less than 100meg total), or the whole run was fast (less than 3 min). or any logged wtf/fails
+# ...both small/fast are possible on a legit month, but rare. 
+# (less than 100meg was common in 2004-2007, never since)
+nagcode=0   # we made it this far. good. 
+if [ $enddutot -lt 100000 ] || [ $duration -lt 180 ] || [ $logwtf -gt 0 ] ; then
+	nagcode=1
+fi
+# critical if crazy small/fast
+# (less than 30 meg occured a few times in 2004, and once in 2005)
+if [ $enddutot -lt 30000 ] || [ $duration -lt 60 ] || [ $logfail -gt 0 ] ; then
+	nagcode=2
+fi
+tell_nagios $nagcode "Got ${dudiff}k in $duration seconds (${rate}k/sec). $YEAR-$MONTH is now ${enddutot}k total size. Logs: $logwtf wtf, $logfail fails"
 
 # find errors
 errors=$(grep "$(date +"%Y-%m-%d") ..:..:.. .... \!" $LOGFILE)
