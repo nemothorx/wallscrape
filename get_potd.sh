@@ -19,6 +19,8 @@
 host=$(hostname)
 service="get_potd"
 nagiosfifo=/var/lib/nagios3/rw/nagios.cmd
+nagiosfifo=/dev/null
+NSCA_SVR=falcon.house.zz
 nagcode=3        # 0 = OK, 1 = Warning, 2 = Critical, 3 = Unknown
 
 LOGFILE=$HOME/var/log/potd.log
@@ -50,7 +52,8 @@ tell_nagios() {
                 code=3
                 output="UNKNOWN - $@"
         fi
-    echo "[$(date +%s)] PROCESS_SERVICE_CHECK_RESULT;$host;$service;$code;$output" > $nagiosfifo
+#    echo "[$(date +%s)] PROCESS_SERVICE_CHECK_RESULT;$host;$service;$code;$output" > $nagiosfifo
+        echo -e "${host}\t${service}\t${code}\t${output}" | /usr/sbin/send_nsca -H $NSCA_SVR  >/dev/null
 }
 
 mk_logtag() {
@@ -112,7 +115,7 @@ do_webget() {
 # * add in national geographic POTD?
 
 do_commonspotd() {
-    TDIR="/shared/Images/WikiPOTD/Commons/$YEAR-$MONTH"
+    TDIR="/srv/Images/WikiPOTD/Commons/$YEAR-$MONTH"
     mkdir -p "$TDIR"
     cd  "$TDIR" 
     MINDEXPAGE="https://commons.wikimedia.org/wiki/Template:Potd/$YEAR-$MONTH"
@@ -142,7 +145,7 @@ do_commonspotd() {
 
 
 do_enwikipotd() {
-    TDIR="/shared/Images/WikiPOTD/enwiki/$YEAR-$MONTH"
+    TDIR="/srv/Images/WikiPOTD/enwiki/$YEAR-$MONTH"
     mkdir -p "$TDIR"
     cd "$TDIR"
     LMONTH=$(date -d "$YEAR-$MONTH-01" +%B)
@@ -171,7 +174,7 @@ do_enwikipotd() {
 }
 
 
-cd /shared/Images/WikiPOTD/
+cd /srv/Images/WikiPOTD/
 startdu=$(du -sk */$YEAR-$MONTH/ 2>/dev/null | tr "\n" "\t")
 startdutot=$(du -skc */$YEAR-$MONTH/ 2>/dev/null | tail -1 | cut -f 1)
 starttime=$(date +%s)
@@ -179,7 +182,7 @@ starttime=$(date +%s)
 do_commonspotd
 do_enwikipotd
 
-cd /shared/Images/WikiPOTD/
+cd /srv/Images/WikiPOTD/
 enddu=$(du -sk */$YEAR-$MONTH/ 2>/dev/null | tr "\n" "\t")
 enddutot=$(du -skc */$YEAR-$MONTH/ 2>/dev/null | tail -1 | cut -f 1)
 duration=$(($(date +%s)-$starttime))
