@@ -1,5 +1,7 @@
 #!/bin/bash
 
+[ ! -d /srv/incoming ] && exit 1
+
 # script to grab picture of the day from
 # * wikipedia (en) 
 # * commons.wikimedia
