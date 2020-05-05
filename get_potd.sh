@@ -1,5 +1,9 @@
 #!/bin/bash
 
+urldecode() {
+    python -c "import sys, urllib as ul; print ul.unquote_plus(sys.argv[1])" $1
+}
+
 [ ! -d /srv/incoming ] && exit 1
 
 # script to grab picture of the day from
@@ -70,17 +74,19 @@ do_webget() {
     url=$1
     outdir=$2
     outfilesize=0
-    [ -t 1 ] && echo "… $url to $outdir"
     
-    # get the file by urldecoding the link, and grabbing the last bit
-    POTDTITLETMP=$(echo "$POTDLINK" | sed -n -e's/%\([0-9A-F][0-9A-F]\)/\\x\1/g' -e's/\(+\|_\)/ /g' -ep | xargs -0 echo -en )
-    POTDFILE=${POTDTITLETMP##*/}
-    outfile="$outdir/$POTDFILE"
+    # get the filname by grabbing the last bit
+    POTDFILE=${url##*/}
+    # our output filename has spaces, not underscores
+    outfile=$(echo "$outdir/$POTDFILE" | tr "_" " ")
+    [ -t 1 ] && echo "… $url to $outfile"
 
     headers=$(curl -s --head $url | tr -d "\015")
-    urllastmod=$(date -d "$(echo "$headers" | awk -F": " '{ if ($1 == "Last-Modified") print $2}')" +%s)
-    urlsize=$(echo -e "$headers" | awk -F": " '{ if ($1 == "Content-Length") print $2}')
-    urltimestamp=$(echo "$headers" | awk -F": " '{ if ($1 == "X-Timestamp") print $2}')
+#    echo "$headers"
+    urllastmod=$(date -d "$(echo "$headers" | awk -F": " '{ if ($1 ~ "[Ll]ast-[Mm]odified") print $2}')" +%s)
+    urlsize=$(echo "$headers" | awk -F": " '{ if ($1 ~ "[Cc]ontent-[Ll]ength") print $2}')
+    urltimestamp=$(echo "$headers" | awk -F": " '{ if ($1 ~ "[Xx]-[Tt]imestamp") print $2}')
+#    echo "$urllastmod . $urlsize . $urltimestamp"
 
     urllastmod_h=$(date -d @$urllastmod +%Y-%m-%dT%H:%M:%S)
     do_log "… request URL size: $urlsize, lastmod: $urllastmod_h for $url"
@@ -124,14 +130,15 @@ do_commonspotd() {
     LOGTAG="----"
     do_log "# Processing commons for $YEAR $MONTH: $MINDEXPAGE"
     MINDEX=$(curl -s -S $MINDEXPAGE)
-    DINDEX=$(echo "$MINDEX" | sed -n 's/.*magnify.*\(wiki\/File:.*\)" class.*/\1/p')
+    DINDEX=$(echo "$MINDEX" | sed -n 's/.*class=.magnify.*\(wiki\/File:.*\)" class=.internal.*/\1/p')
     echo "$DINDEX" | while read DAY ; do
        # echo "found $DAY, here is the image URL"
-	POTDURL="https://commons.wikimedia.org/$DAY"
+        POTDURL=$(urldecode "https://commons.wikimedia.org/$DAY")
 	mk_logtag $POTDURL
 	do_log ": $POTDURL"
 	POTDSRC=$(curl -s -S $POTDURL)
-	POTDLINK=https:$(echo "$POTDSRC"| sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')
+        POTDLINKTMP="https:$(echo "$POTDSRC"| sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')"
+        POTDLINK=$(urldecode "$POTDLINKTMP")
 	do_log ": $POTDLINK"
 	if $(echo "$POTDLINK" | egrep -q "\.(og.|webm)$"); then
 	    do_log "_ ignoring URL (Media of the Day)"
@@ -155,14 +162,15 @@ do_enwikipotd() {
     LOGTAG="----"
     do_log "# Processing enwiki for $YEAR $MONTH: $MINDEXPAGE"
     MINDEX=$(curl -s -S $MINDEXPAGE)
-    DINDEX=$(echo "$MINDEX" | sed -n 's/.*\/\(wiki.*\)\" class=.image.*/\1/p')
+    DINDEX=$(echo "$MINDEX" | sed -n 's/.*\/\(wiki\/File:.*\)\" class=.image.*/\1/p')
     echo "$DINDEX" | while read DAY ; do
 #       echo "found $DAY, here is the image URL"
 	POTDURL="https://en.wikipedia.org/$DAY"
 	mk_logtag $POTDURL
 	do_log ": $POTDURL"
-	POTDSRC=https:$(curl -s -S $POTDURL)
-	POTDLINK=https:$(echo "$POTDSRC" | sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')
+	POTDSRC=$(curl -s -S $POTDURL)
+	POTDLINKTMP="https:$(echo "$POTDSRC" | sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')"
+	POTDLINK=$(urldecode "$POTDLINKTMP")
 	do_log ": $POTDLINK"
 	if $(echo "$POTDLINK" | egrep -q ".(og.|webm)$"); then
 	    do_log "_ ignoring it as Media of the Day"
@@ -175,6 +183,8 @@ do_enwikipotd() {
     done
 }
 
+
+################################# main, basically
 
 cd /srv/Images/WikiPOTD/
 startdu=$(du -sk */$YEAR-$MONTH/ 2>/dev/null | tr "\n" "\t")
