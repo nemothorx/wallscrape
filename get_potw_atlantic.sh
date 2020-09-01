@@ -21,9 +21,14 @@ allthismonths=$(curl -S -s ${baseurl}/photo/$YEAR/$MONTH/ | grep -Po '"/photo/.*
 for week in $allthismonths ; do
     weekurl="${baseurl}${week}"
     echo ": $weekurl"
-    # they changed from /w to /a in 2020 04. Unless it's a history thing? (written in 2020 05)
+    # they changed from /w to /a in the last week of 2020 04
+    # ...Unless it's a history thing? (written in first week of 2020 05)
     curl -s -S $weekurl | grep jpg | grep "/[aw][0123]"
-    # captions to be trawled...
+    # captions to be trawled... `grep -B1 "#img"`
+    # name it something sane... based on the caption??
+
+    # logging... grab from the get_potd.log stuff. 
+    # ...perhaps fold this into that??
 done
 
 
