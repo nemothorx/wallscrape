@@ -1,8 +1,20 @@
 #!/bin/bash
 
+# The Atlantic's photo galleries begun at
+# https://www.theatlantic.com/photo/2011/02/
+# ...Picture Of The Week galleries begun in 2014/05
+
+
+# This is a script to scrape those galleries:
+# - saving high quality images
+# - generating readable markdown for captions and credits
+
+
+
 mainlog=$HOME/var/log/photos_atlantic.log
 YEAR=$1
 MONTH=$2
+reportflag=$3
 
 basedir=/srv/Images/AtlanticPhotos
 
@@ -42,13 +54,47 @@ do_logcmd() {
 [ -z $MONTH ] && MONTH=$(date +%m)
 
 
+################################################## MAIN
+# 
+
+# TODO: 
+# - would be cool to have matching -gethtmlonly and -processhtml options
+# - or maybe even to be smart, note the process steps are
+#   monthhtml -> galleryhtml -> markdown -> images
+# ..and have options like
+#       * "endafter(monthhtml|galleryhtml|markdown)"
+#           or "endbefore(galleryhtml|markdown|images)
+#       * "startafter(monthhtml|galleryhtml|markdown)
+#           or "startbefore(galleryhtml|markdown|images)
+#   and "startwithhtml <path/to/specific.html>"
+# .....though it seems a lot of work for rare use. debugging good tho?
+
+
+monthdir="${basedir}/$YEAR/$MONTH"
+
+    # TODO: make this better (currently goes to cron email)
+if [ -n "$reportflag" ] ; then
+    dirstats.sh $monthdir
+    exit
+fi
+
+
+
+
+
+
 do_log "# Retrieving photos from the atlantic for $YEAR/$MONTH"
 
 baseurl="https://www.theatlantic.com"
 
 monthurl="${baseurl}/photo/$YEAR/$MONTH/"
+do_logcmd "mkdir -pv $monthdir"
 do_log ": $monthurl"
-allinmonth=$(curl -S -s "$monthurl" | grep "a data-omni-click=.inherit. href=./photo/$YEAR/$MONTH/" | cut -d'"' -f 4)
+curl -S -s -D - "$monthurl" > $monthdir/${YEAR}-${MONTH}.html
+do_logcmd "ls -l $monthdir/${YEAR}-${MONTH}.html"
+
+allinmonth=$(cat $monthdir/${YEAR}-${MONTH}.html | grep "a data-omni-click=.inherit. href=./photo/$YEAR/$MONTH/" | cut -d'"' -f 4)
+# TODO: save this allinmonth html to disk too
 
 for link in $allinmonth ; do
     groupurl="${baseurl}${link}"
@@ -63,7 +109,12 @@ for link in $allinmonth ; do
     #
     # We then do a second round of processing to obtain actual images and
     # finalise the markdown
-    curl -S -s "$groupurl" | awk -v URL="$groupurl" -v firstimg="waiting" -F'"' '
+    curl -S -s -D - "$groupurl"  > $groupdir/original.html
+    do_logcmd "ls -l $groupdir/original.html"
+#    continue        # TODO: this should be triggered by a "gethtmlonly" flag or
+    do_log ": Processing original.html into tmp.md"
+
+    cat $groupdir/original.html | awk -v URL="$groupurl" -v firstimg="waiting" -F'"' '
 
 # Obtain the html title
 /<title>/ {
@@ -167,6 +218,9 @@ END {
                 imgurl=$line
                 imgtype=${imgurl##*.}
                 imgname=$(echo "$imgurl" | cut -d/ -f 13)
+                # TODO: imgname should be whatever matches the last string before original.suffix
+                #   ...because in some gif cases, it's the 12th, not 13th
+                #   /path/blah/etc/uniquename/original.sfx
                 imgfinal="$imgname.$imgtype"
                 do_log "> $imgurl"
                 # these have no accurate mtime from http headers, so -O is OK
@@ -195,34 +249,10 @@ END {
     # * images are complete (imagemagick has some verify option)
     # rm tmp.md
 
-    sleep $((RANDOM%5+3)) # sleep for 3/4/5/6/7 seconds before looping to the next gallery
-#    sleep $((RANDOM%3+1)) # sleep for 2/3/4 seconds before looping
+#    sleep $((RANDOM%5+3)) # sleep for 3/4/5/6/7 seconds before looping to the next gallery
+    sleep $((RANDOM%3+1)) # sleep for 2/3/4 seconds before looping
 
 done
 
 # TODO: some post-analysis of what has been gotten
 # ...for logs and also maybe for send2pushover ?
-
-
-
-# notes about older images
-
-
-# notes from 2020-05:
-    # they changed from /w to /a in the last week of 2020 04
-    # ...Unless it's a history thing? (written in first week of 2020 05)
-#    curl -s -S $weekurl | grep jpg | grep "/[aw][0123]"
-    # captions to be trawled... `grep -B1 "#img"`
-    # name it something sane... based on the caption??
-
-   
-
-#
-# can find older photo of the week pages within YYYY/MM pages starting here:
-# https://www.theatlantic.com/photo/2011/02/
-# ...noting that that's ALL photo pages, POTW specific started in 2014/05
-
-
-
-
-
