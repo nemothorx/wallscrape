@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# The Atlantic's photo galleries begun at
-# https://www.theatlantic.com/photo/2011/02/
-# ...Picture Of The Week galleries begun in 2014/05
-
-
-# This is a script to scrape those galleries:
+# This is a script to scrape the photo galleries of The Atlantic:
 # - saving high quality images
 # - generating readable markdown for captions and credits
 
+
+# The Atlantic's photo galleries begun at
+# https://www.theatlantic.com/photo/2011/02/
+# ...Picture Of The Week galleries begun in 2014/05
+# ...alttxt that I use for headings in the markdown began in 2021/01 (but not reliably initially)
 
 
 mainlog=$HOME/var/log/photos_atlantic.log
@@ -79,10 +79,6 @@ if [ -n "$reportflag" ] ; then
 fi
 
 
-
-
-
-
 do_log "# Retrieving photos from the atlantic for $YEAR/$MONTH"
 
 baseurl="https://www.theatlantic.com"
@@ -91,10 +87,10 @@ monthurl="${baseurl}/photo/$YEAR/$MONTH/"
 do_logcmd "mkdir -pv $monthdir"
 do_log ": $monthurl"
 curl -S -s -D - "$monthurl" > $monthdir/${YEAR}-${MONTH}.html
+# TODO: maybe process this year-month.html file into a markdown also?
 do_logcmd "ls -l $monthdir/${YEAR}-${MONTH}.html"
 
 allinmonth=$(cat $monthdir/${YEAR}-${MONTH}.html | grep "a data-omni-click=.inherit. href=./photo/$YEAR/$MONTH/" | cut -d'"' -f 4)
-# TODO: save this allinmonth html to disk too
 
 for link in $allinmonth ; do
     groupurl="${baseurl}${link}"
@@ -114,13 +110,38 @@ for link in $allinmonth ; do
 #    continue        # TODO: this should be triggered by a "gethtmlonly" flag or
     do_log ": Processing original.html into tmp.md"
 
-    cat $groupdir/original.html | awk -v URL="$groupurl" -v firstimg="waiting" -F'"' '
+    cat $groupdir/original.html | awk -v URL="$groupurl" -v byline="waiting" -v firstimg="waiting" -F'"' '
 
 # Obtain the html title
 /<title>/ {
     gsub(/ *<[^>]+> */," ",$0) 
     {print "# "$0""}
 } 
+
+# TODO: obtain byline/date/photo count/kicker - this to match original
+# cat -n original.html|  grep -E "li class=.(byline|date|num-photos|kicker)"
+# ...note must only get the first of these. in-page links to other galleries have repeats of some of these at the end of the html
+{ if ( /li class=.byline/ && byline=="waiting" ){
+        author=$6 
+    }
+}
+{ if ( /li class=.date/ && byline=="waiting" ){
+        gsub(/ *<[^>]+> */," ",$0) 
+        date=$0
+    }
+}
+{ if ( /li class=.num-photos/ && byline=="waiting" ){
+        gsub(/ *<[^>]+> */," ",$0) 
+        numphotos=$0
+    }
+}
+{ if ( /li class=.kicker/ && byline=="waiting" ){
+        gsub(/ *<[^>]+> */," ",$0) 
+        kicker=$0
+        print "## "author" | "date" | "numphotos" | "kicker
+        byline="done"
+    }
+}
 
 # Obtain the article text. Expected to be one line since this is mostly about images
     # First, identify the tags that start and end the article
@@ -143,7 +164,9 @@ for link in $allinmonth ; do
 }
 
     # unset the flag when we identify the last image
-    # ...and capture the alt-text which is on this match
+    # ...and capture the alt-text which is on this match.
+    # This alttxt becomes the header per image in the markdown
+    # ...it is not there prior to 2021 and no obvious alternative
 /img data-src.*lazyload/ {
     alttxt=$4
     firstimg="waiting"
@@ -205,6 +228,7 @@ END {
     # original URLs are all in a path that includes "thumbor" so we're keying from that
     mdfile=$(cat tmp.md | grep thumbor | cut -d/ -f 12 | head -1).md
     do_log ": Processing tmp.md into $mdfile +image downloads"
+    cat /dev/null > $mdfile
 
 #    cat tmp.md | recode html..utf8 | while read line ; do 
 #    ...recode was catching too much stuff and causing errors. 
@@ -222,18 +246,23 @@ END {
                 #   ...because in some gif cases, it's the 12th, not 13th
                 #   /path/blah/etc/uniquename/original.sfx
                 imgfinal="$imgname.$imgtype"
-                do_log "> $imgurl"
-                # these have no accurate mtime from http headers, so -O is OK
-                do_logcmd "wget -nc -nv \"$imgurl\" -O $imgfinal"
+                if [ -s "$imgfinal" ] ; then
+                    do_log ": $imgfinal already exists"
+                else
+                    do_log "> $imgurl"
+                    # these have no accurate mtime from http headers, so -O is OK
+                    # -nc and -O are OK together, so skips downloading if already have it (safety against check above)
+                    do_logcmd "wget -nc -nv \"$imgurl\" -O $imgfinal"
 
-                # note: this identify will exit1 if there are errors
-                # ...however, I don't know if that exitcode travels back all the way to here
-                # TODO: find that out. retry/log/whatever if it does
-                do_log ": $(identify -regard-warnings $imgfinal)"
+                    # note: this identify will exit1 if there are errors
+                    # ...however, I don't know if that exitcode travels back all the way to here
+                    # TODO: find that out. retry/log/whatever if it does
+                    do_log ": $(identify -regard-warnings $imgfinal)"
                 
-                # this is what embedded images in markdown look like 
-                # note: no alt text since we've turned that into the header
-                # for each block
+                    # this is what embedded images in markdown look like 
+                    # note: no alt text since we've turned that into the header
+                    # for each block
+                fi
                 echo "!($imgfinal)" >> $mdfile
                 ;;
             *)
