@@ -10,6 +10,18 @@
 # ...Picture Of The Week galleries begun in 2014/05
 # ...alttxt that I use for headings in the markdown began in 2021/01 (but not reliably initially)
 
+# A note on overwrite behaviour: 
+# By default, this script will re-download any html required on each run.
+# This is primarily so the current month can always catch up from a previous part-month run. 
+# By default, this script till NOT redownload any images required. 
+# This is because they're not considered likely to change, and are a more notable download burden. Plus could lose data due to removal upstream. 
+# (In the case of upstream removal, we MAY lose some html referencing it)
+# (at time of wrtiting - Dec 2022 - no upstream removals are known)
+
+
+parseonly=""      # if $parseonly exists, we ONLY parse existing html into markdown. 
+                    # ie, we never talk to the internet. 
+                    # if this ever needs to be come common, it should become an option, not a in-script toggle
 
 mainlog=$HOME/var/log/photos_atlantic.log
 YEAR=$1
@@ -57,6 +69,8 @@ do_logcmd() {
 ################################################## MAIN
 # 
 
+[ -n "$parseonly" ] && do_log ":: This session is 'parseonly'. Parsing pre-cached html only (making directories and markdown)"
+
 # TODO: 
 # - would be cool to have matching -gethtmlonly and -processhtml options
 # - or maybe even to be smart, note the process steps are
@@ -78,15 +92,16 @@ if [ -n "$reportflag" ] ; then
     exit
 fi
 
-
 do_log "# Retrieving photos from the atlantic for $YEAR/$MONTH"
+
+touch "$basedir/.flag"
 
 baseurl="https://www.theatlantic.com"
 
 monthurl="${baseurl}/photo/$YEAR/$MONTH/"
 do_logcmd "mkdir -pv $monthdir"
 do_log ": $monthurl"
-curl -S -s -D - "$monthurl" > $monthdir/${YEAR}-${MONTH}.html
+[ -z "$parseonly" ] && curl -S -s -D - "$monthurl" > $monthdir/${YEAR}-${MONTH}.html
 # TODO: maybe process this year-month.html file into a markdown also?
 do_logcmd "ls -l $monthdir/${YEAR}-${MONTH}.html"
 
@@ -105,7 +120,7 @@ for link in $allinmonth ; do
     #
     # We then do a second round of processing to obtain actual images and
     # finalise the markdown
-    curl -S -s -D - "$groupurl"  > $groupdir/original.html
+    [ -z "$parseonly" ] && curl -S -s -D - "$groupurl" > $groupdir/original.html
     do_logcmd "ls -l $groupdir/original.html"
 #    continue        # TODO: this should be triggered by a "gethtmlonly" flag or
     do_log ": Processing original.html into tmp.md"
@@ -151,7 +166,10 @@ for link in $allinmonth ; do
 
     # And here we print the article text itself (removing leading spaces)
 { if ( contentcredit=="content" ) {
-    gsub(/ *<[^>]+> */,"",$0) 
+#    gsub(/ *<[^>]+> */,"",$0) 
+    # removing <p> and <div> tags, but leaving others (a href)
+    # TODO: convert html links to markdown links
+    gsub(/ *<([/p]+|div id=.article-content.)> */,"",$0) 
         print $0
     }
 }
@@ -252,7 +270,7 @@ END {
                     do_log "> $imgurl"
                     # these have no accurate mtime from http headers, so -O is OK
                     # -nc and -O are OK together, so skips downloading if already have it (safety against check above)
-                    do_logcmd "wget -nc -nv \"$imgurl\" -O $imgfinal"
+                    [ -z "$parseonly" ] && do_logcmd "wget -nc -nv \"$imgurl\" -O $imgfinal"
 
                     # note: this identify will exit1 if there are errors
                     # ...however, I don't know if that exitcode travels back all the way to here
@@ -285,3 +303,7 @@ done
 
 # TODO: some post-analysis of what has been gotten
 # ...for logs and also maybe for send2pushover ?
+
+cd $basedir 
+find . -mindepth 3 -maxdepth 3 -type d -newer .flag | send2pushover.sh
+
