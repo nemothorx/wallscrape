@@ -105,7 +105,7 @@ do_log ": $monthurl"
 # TODO: maybe process this year-month.html file into a markdown also?
 do_logcmd "ls -l $monthdir/${YEAR}-${MONTH}.html"
 
-allinmonth=$(cat $monthdir/${YEAR}-${MONTH}.html | grep "a data-omni-click=.inherit. href=./photo/$YEAR/$MONTH/" | cut -d'"' -f 4)
+allinmonth=$(cat $monthdir/${YEAR}-${MONTH}.html | grep -o "href=./photo/$YEAR/$MONTH/.*" | cut -d'"' -f 2)
 
 for link in $allinmonth ; do
     groupurl="${baseurl}${link}"
@@ -268,7 +268,7 @@ END {
                     do_log ": $imgfinal already exists"
                 else
                     do_log "> $imgurl"
-                    # these have no accurate mtime from http headers, so -O is OK
+                    # these have no "Last-Modified" from http headers, so -O is OK
                     # -nc and -O are OK together, so skips downloading if already have it (safety against check above)
                     [ -z "$parseonly" ] && do_logcmd "wget -nc -nv \"$imgurl\" -O $imgfinal"
 
