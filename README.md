@@ -12,6 +12,3 @@ Scripts here scrape the following sources
 
 [Wallsmart](https://github.com/nemothorx/wallsmart) is my wallpaper library management utility, and sets images smartly as wallpaper, respecting original ratio and filling borders with sympathetic colours. 
 
-----
-
-This repo populated with revisions of scripts recovered from backups in Aug 2024, and assembled into a git repo using [git timemachine](https://github.com/nemothorx/neon-git).
