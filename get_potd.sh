@@ -136,9 +136,9 @@ do_commonspotd() {
 	do_log ": $POTDURL"
 	POTDPAGE="https://commons.wikimedia.org/$(curl -s -S "${POTDURL}" | grep -o "./wiki/File:.* "  | cut -d'"' -f 2)"
 	do_log ": $POTDPAGE"
-        POTDLINK=$(curl -s -S "${POTDPAGE}" | grep "Original file" | grep -o "href=.*" | cut -d'"' -f 2)
+        POTDLINK=$(curl -s -S "${POTDPAGE}" | grep -E "Original file|MIME type:" | grep -o "href=.*" | cut -d'"' -f 2)
 	do_log ": $POTDLINK"
-	if $(echo "$POTDLINK" | egrep -q "/No.image\.svg$"); then
+	if $(echo "$POTDLINK" | egrep -q "No.image\.svg$"); then
 	    do_log "_ ignoring URL (No image.svg)"
 	else
 	    do_webget "$POTDLINK" "$TDIR"
@@ -161,9 +161,9 @@ do_enwikipotd() {
             POTDPAGE="https://en.wikipedia.org/$POTDPAGEPATH"
 	    do_log ": $POTDPAGE"
             # hardcoding leading "https:" based off sample of two seen in 2024-06 POTD. TODO: be smarter
-            POTDLINK="https:$(curl -s -S "${POTDPAGE}" | grep "Original file" | grep -o "href=.*" | cut -d'"' -f 2)"
+            POTDLINK="https:$(curl -s -S "${POTDPAGE}" | grep -E "Original file|MIME type:" | grep -o "href=.*" | cut -d'"' -f 2)"
             do_log ": $POTDLINK"
-            if $(echo "$POTDLINK" | egrep -q "/No.image\.svg$"); then
+            if $(echo "$POTDLINK" | egrep -q "No.image\.svg$"); then
                 do_log "_ ignoring URL (No image.svg)"
             else
                 do_webget "$POTDLINK" "$TDIR"
