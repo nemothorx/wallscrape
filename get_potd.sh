@@ -1,8 +1,5 @@
 #!/bin/bash
 
-urldecode() {
-    python -c "import sys, urllib as ul; print ul.unquote_plus(sys.argv[1])" $1
-}
 
 [ ! -d /srv/incoming ] && exit 1
 
@@ -19,7 +16,13 @@ urldecode() {
     # 0 4     8 * *   /home/nemo/bin/get_potd.sh $(date -d 'now -2 months' "+\%Y \%m")
     # 0 4     15  * * /home/nemo/bin/get_potd.sh
     # 0 4     29  * * /home/nemo/bin/get_potd.sh $(date -d 'now -12 months' "+\%Y \%m")
-    #
+    # ...and so on
+
+# 2024 note: Indexes of all months for future reference
+# * https://commons.wikimedia.org/wiki/Template:Potd_and_Motd/Month
+# * https://en.wikipedia.org/wiki/Template:POTDArchiveLinks
+# ...note, I do not use these or the links within in the code below
+# ...instead, I calculate suitable "YYYY-MM-DD" URLs directly and use those
 
 # nagios settings
 host=$(hostname)
@@ -62,10 +65,10 @@ tell_nagios() {
         echo -e "${host}\t${service}\t${code}\t${output}" | /usr/sbin/send_nsca -H $NSCA_SVR  >/dev/null
 }
 
-mk_logtag() {
-    LOGTAG=$(echo $1 | md5sum | cut -c 1-5 | tr -d "\n")
+# bash urldecode from https://stackoverflow.com/questions/6250698/how-to-decode-url-encoded-string-in-shell#37840948
+urldecode() {
+     : "${*//+/ }"; echo -e "${_//%/\\x}"; 
 }
-
 
 # this function is given two parameters. 
 # $1 is a URL to get
@@ -77,8 +80,8 @@ do_webget() {
     
     # get the filname by grabbing the last bit
     POTDFILE=${url##*/}
-    # our output filename has spaces, not underscores
-    outfile=$(echo "$outdir/$POTDFILE" | tr "_" " ")
+    # urlencoder   our output filename has spaces, not underscores
+    outfile="$(urldecode "$outdir/$POTDFILE" | tr "_" " ")"
     [ -t 1 ] && echo "… $url to $outfile"
 
     headers=$(curl -s --head $url | tr -d "\015")
@@ -125,27 +128,18 @@ do_webget() {
 do_commonspotd() {
     TDIR="/srv/Images/WikiPOTD/Commons/$YEAR-$MONTH"
     mkdir -p "$TDIR"
-    cd  "$TDIR" 
-    MINDEXPAGE="https://commons.wikimedia.org/wiki/Template:Potd/$YEAR-$MONTH"
-    LOGTAG="----"
-    do_log "# Processing commons for $YEAR $MONTH: $MINDEXPAGE"
-    MINDEX=$(curl -s -S $MINDEXPAGE)
-    DINDEX=$(echo "$MINDEX" | sed -n 's/.*class=.magnify.*\(wiki\/File:.*\)" class=.internal.*/\1/p')
-    echo "$DINDEX" | while read DAY ; do
-       # echo "found $DAY, here is the image URL"
-        POTDURL=$(urldecode "https://commons.wikimedia.org/$DAY")
-	mk_logtag $POTDURL
+    cd "$TDIR" 
+    DLIST=$(for n in {1..31} ; do date -d ${YEAR}-${MONTH}-$n +"%Y-%m-%d" 2>/dev/null ; done)
+    echo "$DLIST" | while read DATE ; do
+        POTDURL="https://commons.wikimedia.org/wiki/Template:Potd/${DATE}_(en)"
+        LOGTAG="com$(echo "$DATE" | tr -d '-')"
 	do_log ": $POTDURL"
-	POTDSRC=$(curl -s -S $POTDURL)
-        POTDLINKTMP="https:$(echo "$POTDSRC"| sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')"
-        POTDLINK=$(urldecode "$POTDLINKTMP")
+	POTDPAGE="https://commons.wikimedia.org/$(curl -s -S "${POTDURL}" | grep -o "./wiki/File:.* "  | cut -d'"' -f 2)"
+	do_log ": $POTDPAGE"
+        POTDLINK=$(curl -s -S "${POTDPAGE}" | grep "Original file" | grep -o "href=.*" | cut -d'"' -f 2)
 	do_log ": $POTDLINK"
-	if $(echo "$POTDLINK" | egrep -q "\.(og.|webm)$"); then
-	    do_log "_ ignoring URL (Media of the Day)"
-	elif $(echo "$POTDLINK" | egrep -q "/No.image\.svg$"); then
+	if $(echo "$POTDLINK" | egrep -q "/No.image\.svg$"); then
 	    do_log "_ ignoring URL (No image.svg)"
-	elif $(echo "$POTDLINK" | egrep -q "/Audio-card\.svg$"); then
-	    do_log "_ ignoring URL (Audio-card.svg)"
 	else
 	    do_webget "$POTDLINK" "$TDIR"
 	fi
@@ -157,29 +151,27 @@ do_enwikipotd() {
     TDIR="/srv/Images/WikiPOTD/enwiki/$YEAR-$MONTH"
     mkdir -p "$TDIR"
     cd "$TDIR"
-    LMONTH=$(date -d "$YEAR-$MONTH-01" +%B)
-    MINDEXPAGE="https://en.wikipedia.org/wiki/Wikipedia:Picture_of_the_day/${LMONTH}_${YEAR}"
-    LOGTAG="----"
-    do_log "# Processing enwiki for $YEAR $MONTH: $MINDEXPAGE"
-    MINDEX=$(curl -s -S $MINDEXPAGE)
-    DINDEX=$(echo "$MINDEX" | sed -n 's/.*\/\(wiki\/File:.*\)\" class=.image.*/\1/p')
-    echo "$DINDEX" | while read DAY ; do
-#       echo "found $DAY, here is the image URL"
-	POTDURL="https://en.wikipedia.org/$DAY"
-	mk_logtag $POTDURL
+    DLIST=$(for n in {1..31} ; do date -d ${YEAR}-${MONTH}-$n +"%Y-%m-%d" 2>/dev/null ; done)
+    echo "$DLIST" | while read DATE ; do
+        POTDURL="https://en.wikipedia.org/wiki/Template:POTD/${DATE}"
+        LOGTAG="enw$(echo "$DATE" | tr -d '-')"
 	do_log ": $POTDURL"
-	POTDSRC=$(curl -s -S $POTDURL)
-	POTDLINKTMP="https:$(echo "$POTDSRC" | sed -n 's/.*fullMedia.*\(\/\/.*\)" class.*/\1/p')"
-	POTDLINK=$(urldecode "$POTDLINKTMP")
-	do_log ": $POTDLINK"
-	if $(echo "$POTDLINK" | egrep -q ".(og.|webm)$"); then
-	    do_log "_ ignoring it as Media of the Day"
-	elif $(echo "$POTDLINK" | egrep -q "/No.image\.svg$"); then
-	    do_log "_ ignoring it as No image"
-	else
-	    [ -t 0 ] && echo "$POTDLINK"
-	    do_webget "$POTDLINK" "$TDIR"
-	fi
+	POTDPAGEPATH="$(curl -s -S "${POTDURL}" | grep -o "./wiki/File:.* "  | cut -d'"' -f 2)"
+        if [ -n "$POTDPAGEPATH" ] ; then
+            POTDPAGE="https://en.wikipedia.org/$POTDPAGEPATH"
+	    do_log ": $POTDPAGE"
+            # hardcoding leading "https:" based off sample of two seen in 2024-06 POTD. TODO: be smarter
+            POTDLINK="https:$(curl -s -S "${POTDPAGE}" | grep "Original file" | grep -o "href=.*" | cut -d'"' -f 2)"
+            do_log ": $POTDLINK"
+            if $(echo "$POTDLINK" | egrep -q "/No.image\.svg$"); then
+                do_log "_ ignoring URL (No image.svg)"
+            else
+                do_webget "$POTDLINK" "$TDIR"
+            fi
+        else
+            # no POTDPAGEPATH means POTD is probably media or missing for some reason
+            do_log "! no POTD found. Perhaps review $POTDURL manually"
+        fi
     done
 }
 
@@ -206,8 +198,8 @@ do_log "duration: $duration seconds"
 dudiff=$(($enddutot-$startdutot ))
 rate=$(($dudiff/$duration))
 
-logwtf=$( grep -c "$(date +"%Y-%m-%d") ..... . wtf" $LOGFILE )
-logfail=$( grep -c "$(date +"%Y-%m-%d") ..... . wtf" $LOGFILE )
+logwtf=$( grep -c "$(date +"%Y-%m-%d") .* wtf" $LOGFILE )
+logfail=$( grep -c "$(date +"%Y-%m-%d") .* wtf" $LOGFILE )
 
 
 # warning if the total data is small (less than 100meg total), or the whole run was fast (less than 3 min). or any logged wtf/fails
